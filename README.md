@@ -1,4 +1,4 @@
-# TUI Music
+# Gbonds
 
 A terminal player for a local music library. I keep my music as files, so
 there is no streaming, account or online metadata lookup here. Point the app
