@@ -1025,7 +1025,7 @@ class StatusNotice(Message):
 class MusicApp(App):
     """ANSI-rice TUI: библиотека, рекомендации, очередь и плейлисты."""
 
-    TITLE = "Gbond"
+    TITLE = "Gbonds"
     SUB_TITLE = "TUI PLAYER WITH LOCAL RECOMENDATIONS"
 
     CSS = """
@@ -1914,7 +1914,7 @@ class MusicApp(App):
         yield Footer(compact=False, show_command_palette=False)
 
     def on_mount(self) -> None:
-        self.title = "tui music"
+        self.title = self.TITLE
         self.sub_title = "ANSI RICE PLAYER"
 
         self._apply_layout(self.size.width)
