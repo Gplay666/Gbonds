@@ -13,6 +13,24 @@ class Graph:
         self.directed = directed
         self.nodes = {}      # список смежности: {узел: [соседи]}
         self.edges = []      # список рёбер: [{'from': a, 'to': b, 'weight': w}]
+        # Индекс рёбер для O(1) проверки дубликатов. Без него загрузка
+        # библиотеки на 24k рёбер квадратично перебирала весь список.
+        self._edge_lookup = {}
+
+    def _rebuild_edge_lookup(self):
+        """Пересобирает индекс после массового удаления рёбер."""
+        self._edge_lookup = {}
+        for edge in self.edges:
+            self._edge_lookup[(edge['from'], edge['to'])] = edge
+            if not self.directed:
+                self._edge_lookup[(edge['to'], edge['from'])] = edge
+
+    def clear_edges(self):
+        """Удаляет все рёбра, сохраняя вершины."""
+        for node in self.nodes:
+            self.nodes[node] = []
+        self.edges = []
+        self._edge_lookup = {}
 
     def add_node(self, node):
         """Добавляет вершину в граф, если она ещё не существует."""
@@ -24,21 +42,33 @@ class Graph:
         """
         Добавляет ребро между from_node и to_node с заданным весом.
         Если граф неориентированный, добавляется также обратное ребро.
+        Повторное добавление того же ребра не создаёт дубликат: вес
+        обновляется до максимального.
         """
         if from_node not in self.nodes or to_node not in self.nodes:
             raise ValueError("Обе вершины должны существовать в графе. Сначала добавьте их через add_node.")
 
+        # Если ребро уже есть — обновляем вес, а не плодим дубликаты.
+        existing = self._edge_lookup.get((from_node, to_node))
+        if existing is None and not self.directed:
+            existing = self._edge_lookup.get((to_node, from_node))
+        if existing is not None:
+            existing['weight'] = max(existing['weight'], weight)
+            return
+
         # Добавляем в список смежности
-        self.nodes[from_node].append(to_node)
-        if not self.directed:
+        if to_node not in self.nodes[from_node]:
+            self.nodes[from_node].append(to_node)
+        if not self.directed and from_node not in self.nodes[to_node]:
             self.nodes[to_node].append(from_node)
 
-        # Добавляем в список рёбер
-        self.edges.append({'from': from_node, 'to': to_node, 'weight': weight})
+        # Добавляем в список рёбер. Для неориентированного графа храним
+        # обе ориентации в индексе: так поиск работает при любом порядке.
+        edge = {'from': from_node, 'to': to_node, 'weight': weight}
+        self.edges.append(edge)
+        self._edge_lookup[(from_node, to_node)] = edge
         if not self.directed:
-            # Для неориентированного графа храним только одно ребро, но с учётом направленности в матрице оно будет симметричным.
-            # Можно добавить и обратное, но это избыточно. Оставим одно.
-            pass
+            self._edge_lookup[(to_node, from_node)] = edge
 
     def remove_node(self, node):
         """Удаляет вершину и все связанные с ней рёбра."""
@@ -47,6 +77,7 @@ class Graph:
 
         # Удаляем все рёбра, содержащие эту вершину
         self.edges = [e for e in self.edges if e['from'] != node and e['to'] != node]
+        self._rebuild_edge_lookup()
 
         # Удаляем вершину из списка смежности
         del self.nodes[node]
@@ -55,6 +86,27 @@ class Graph:
         for other in self.nodes:
             self.nodes[other] = [n for n in self.nodes[other] if n != node]
 
+    def remove_incident_edges(self, node):
+        """Удаляет все рёбра вершины, оставляя саму вершину в графе."""
+        if node not in self.nodes:
+            return 0
+        before = len(self.edges)
+        self.edges = [
+            edge
+            for edge in self.edges
+            if edge['from'] != node and edge['to'] != node
+        ]
+        self._rebuild_edge_lookup()
+        for other in self.nodes:
+            if other != node:
+                self.nodes[other] = [
+                    neighbor
+                    for neighbor in self.nodes[other]
+                    if neighbor != node
+                ]
+        self.nodes[node] = []
+        return before - len(self.edges)
+
     def remove_edge(self, from_node, to_node, weight=None):
         """
         Удаляет ребро между from_node и to_node.
@@ -62,19 +114,20 @@ class Graph:
         Если не указан, удаляется первое попавшееся ребро между этими вершинами.
         Для неориентированного графа удаляется ребро в любом направлении.
         """
-        # Поиск индекса ребра для удаления
-        index_to_remove = None
-        for i, e in enumerate(self.edges):
-            if (e['from'] == from_node and e['to'] == to_node) or \
-               (not self.directed and e['from'] == to_node and e['to'] == from_node):
-                if weight is None or e['weight'] == weight:
-                    index_to_remove = i
-                    break
+        # Поиск ребра через индекс.
+        removed_edge = self._edge_lookup.get((from_node, to_node))
+        if removed_edge is None and not self.directed:
+            removed_edge = self._edge_lookup.get((to_node, from_node))
 
-        if index_to_remove is None:
+        if removed_edge is None or (
+            weight is not None and removed_edge['weight'] != weight
+        ):
             raise ValueError(f"Ребро между {from_node} и {to_node} не найдено.")
 
-        removed_edge = self.edges.pop(index_to_remove)
+        self.edges.remove(removed_edge)
+        self._edge_lookup.pop((removed_edge['from'], removed_edge['to']), None)
+        if not self.directed:
+            self._edge_lookup.pop((removed_edge['to'], removed_edge['from']), None)
 
         # Удаляем из списков смежности
         # В ориентированном графе удаляем только из from_node
@@ -115,6 +168,16 @@ class Graph:
     def has_node(self, node):
         return node in self.nodes
 
+    def has_edge(self, from_node, to_node):
+        return self.get_edge_weight(from_node, to_node) is not None
+
+    def get_edge_weight(self, from_node, to_node, default=None):
+        """Вес ребра между вершинами или default, если ребра нет."""
+        edge = self._edge_lookup.get((from_node, to_node))
+        if edge is None and not self.directed:
+            edge = self._edge_lookup.get((to_node, from_node))
+        return edge['weight'] if edge is not None else default
+
     def get_neighbors(self, node):
         return self.nodes.get(node, [])
 
@@ -124,6 +187,7 @@ class Graph:
         edges_str = ", ".join(f"{e['from']}->{e['to']}({e['weight']})" for e in self.edges)
         return f"Graph(nodes=[{nodes_str}], edges=[{edges_str}])"
 
+    @staticmethod
     def bfs(graph, start, max_depth=2):
 
         visited = set()

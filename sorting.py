@@ -1,6 +1,3 @@
-import random
-import timeit
-import matplotlib.pyplot as plt
 def quicksort(arr, key=lambda x: x):
     if len(arr) <= 1:
         return arr.copy()
